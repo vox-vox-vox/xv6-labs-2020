@@ -324,7 +324,7 @@ sfence_vma()
 #define PGSHIFT 12  // bits of offset within a page
 
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
-#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1)) // 将a的后12（PGSIZE大小）位都置为0，相当于向下取整，因为要考虑PAGE的大小
 
 #define PTE_V (1L << 0) // valid
 #define PTE_R (1L << 1)
@@ -340,9 +340,9 @@ sfence_vma()
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
 // extract the three 9-bit page table indices from a virtual address.
-#define PXMASK          0x1FF // 9 bits
-#define PXSHIFT(level)  (PGSHIFT+(9*(level)))
-#define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
+#define PXMASK          0x1FF // 9 bits，二进制为：...0111111111
+#define PXSHIFT(level)  (PGSHIFT+(9*(level))) // level=0 12+9*0 ; level=1 12+9*1 ; level=2 12+9*2
+#define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK) // 取出每个level的pagetable对应的9bit index
 
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by
@@ -350,5 +350,5 @@ sfence_vma()
 // that have the high bit set.
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
-typedef uint64 pte_t;
-typedef uint64 *pagetable_t; // 512 PTEs
+typedef uint64 pte_t; // pte 本身就是一个uint64大小的数
+typedef uint64 *pagetable_t; // 512 PTEs，定义了一个指向第0个pte(基址)的指针，所以是uint64*类型的

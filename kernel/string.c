@@ -1,5 +1,6 @@
 #include "types.h"
 
+// 将地址为（dst～dst+n-1）的所有内容都写成c
 void*
 memset(void *dst, int c, uint n)
 {

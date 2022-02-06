@@ -20,6 +20,9 @@ static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
+extern char etext[];
+
+extern pagetable_t kernel_pagetable;
 
 // initialize the proc table at boot time.
 void
@@ -34,14 +37,15 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
-  kvminithart();
+  // kvminithart();
 }
 
 // Must be called with interrupts disabled,
@@ -121,6 +125,14 @@ found:
     return 0;
   }
 
+  // kernel page table for process
+  p->kpagetable= proc_kpagetable(p);
+  if(p->kpagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -140,7 +152,7 @@ freeproc(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
   if(p->pagetable)
-    proc_freepagetable(p->pagetable, p->sz);
+    proc_freepagetable(p->pagetable, p->sz); 
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -150,6 +162,14 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  //尝试释放一下内核栈的物理空间试试
+  uint64 kstack_pa = kvmpa(p->kpagetable, p->kstack); // 内核栈物理地址
+  kfree((void*)kstack_pa); // 释放内核栈
+  p->kstack = 0;
+
+  freekpagetable(p->kpagetable);
+  p->kpagetable = 0;   
 }
 
 // Create a user page table for a given process,
@@ -190,9 +210,44 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
-  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(pagetable, TRAPFRAME, 1, 0);
-  uvmfree(pagetable, sz);
+  uvmunmap(pagetable, TRAMPOLINE, 1, 0);// 删除TRAMPOLINE的pte条目
+  uvmunmap(pagetable, TRAPFRAME, 1, 0);// 删除TRAPFRAME的pte条目
+  uvmfree(pagetable, sz);// 释放
+}
+
+// Free a process's kernelpage table, do not free the
+// physical memory it refers to.
+// void
+// proc_freekpagetable(struct proc *p)
+// {
+//   pagetable_t kpagetable = p->kpagetable;
+  // uvmunmap(kpagetable, TRAMPOLINE, 1, 0);// 删除TRAMPOLINE的pte条目
+  // uvmunmap(kpagetable, KSTACK((int) (p - proc)), 1, 0);// 删除Kernel Stack的pte条目
+  // // printf("CLINT\n");
+  // // uvmunmap(kpagetable, CLINT, PGROUNDUP(0x10000)/PGSIZE, 0);// 删除CLINT的pte条目 
+  // uvmunmap(kpagetable, PLIC, PGROUNDUP(0x400000)/PGSIZE, 0);// 删除PLIC的pte条目
+  // uvmunmap(kpagetable, UART0, 1, 0);// 删除UART0的pte条目
+  // uvmunmap(kpagetable, VIRTIO0, 1, 0);// 删除VIRTIO0的pte条目
+  // uvmunmap(kpagetable, KERNBASE, PGROUNDUP(PHYSTOP-KERNBASE)/PGSIZE, 0);// 删除kernel的pte条目
+// }
+
+
+// Recursively free page-table pages.
+// All leaf mappings must already have been removed.
+void
+freekpagetable(pagetable_t pagetable)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      freekpagetable((pagetable_t)child);
+      pagetable[i] = 0;
+    }
+  }
+  kfree((void*)pagetable);
 }
 
 // a user program that calls exec("/init")
@@ -471,6 +526,8 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        w_satp(MAKE_SATP(p->kpagetable));
+        sfence_vma();
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
@@ -486,6 +543,8 @@ scheduler(void)
 #if !defined (LAB_FS)
     if(found == 0) {
       intr_on();
+      w_satp(MAKE_SATP(kernel_pagetable));
+      sfence_vma();
       asm volatile("wfi");
     }
 #else
@@ -696,4 +755,61 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+/*
+ * create a direct-map page table for the kernel.
+ * 创建一个内核的pagetable
+ */
+pagetable_t
+proc_kpagetable(struct proc *p)
+{
+  pagetable_t kernel_pagetable = (pagetable_t) kalloc();
+  memset(kernel_pagetable, 0, PGSIZE);
+
+
+  if(mappages(kernel_pagetable, UART0, PGSIZE, UART0, PTE_R | PTE_W) != 0)
+    panic("uart0");
+
+
+  // virtio mmio disk interface
+  if(mappages(kernel_pagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W) != 0)
+    panic("virtio");  
+
+
+  // CLINT
+  // if(mappages(kernel_pagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W) != 0)
+  //   panic("CLINT");
+
+
+  // PLIC
+  if(mappages(kernel_pagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W) != 0)
+    panic("PLIC");
+
+
+  // map kernel text executable and read-only.
+  if(mappages(kernel_pagetable, KERNBASE, (uint64)etext-KERNBASE, KERNBASE, PTE_R | PTE_X) != 0)
+    panic("kernel text");
+
+
+  // map kernel data and the physical RAM we'll make use of.
+  if(mappages(kernel_pagetable, (uint64)etext, PHYSTOP-(uint64)etext, (uint64)etext, PTE_R | PTE_W) != 0)
+    panic("kernel data");
+
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  if(mappages(kernel_pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X) != 0)
+    panic("trampoline");
+
+  // kernel stack
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");  
+  uint64 va = KSTACK((int) (0)); // !!!! 还应该和以前保持一样吗？以前为什么是这样的？
+  if(mappages(kernel_pagetable, va, PGSIZE, (uint64)pa, PTE_R | PTE_W) != 0)
+    panic("stack");
+  p->kstack = va;
+  return kernel_pagetable;
 }

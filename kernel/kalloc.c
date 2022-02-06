@@ -43,6 +43,7 @@ freerange(void *pa_start, void *pa_end)
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
+// 一次free一页
 void
 kfree(void *pa)
 {
@@ -63,6 +64,7 @@ kfree(void *pa)
 }
 
 // Allocate one 4096-byte page of physical memory.
+// 分配一个4kb的物理内存，并返回一个指向它的指针
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
 void *
@@ -73,7 +75,7 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
-    kmem.freelist = r->next;
+    kmem.freelist = r->next;// 从freelist中删除第一个元素
   release(&kmem.lock);
 
   if(r)
