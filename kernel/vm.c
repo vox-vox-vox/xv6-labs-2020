@@ -177,10 +177,10 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
-// 移除从a开始的n页映射，va必须是4kb的整数倍，映射必须存在。每次移除一整页，所以a+=PGSIZE
-// 本质是pte=0，一个pte的值=0意味着mapping被free了一个。注意到，一个pte实际上对应着虚拟地址的4kb
 // Optionally free the physical memory.
-// uvmunmap只清除叶子映射（或物理内容）
+// 移除从va开始的n页映射，va必须是4kb的整数倍，映射必须存在。每次移除一整页，所以a+=PGSIZE
+// 释放的本质是pte=0，一个pte的值=0意味着mapping被free了一个。注意到，一个pte实际上对应着虚拟地址的4kb
+// uvmunmap只清除叶子映射，而不清除一级或二级页表（或三级页表对应的最后的物理内容）
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
@@ -199,7 +199,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      kfree((void*)pa);// 释放一个PGSIZE
     }
     *pte = 0;
   }
@@ -247,12 +247,12 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
-    mem = kalloc();
+    mem = kalloc();// 分配物理内存
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
-    memset(mem, 0, PGSIZE);
+    memset(mem, 0, PGSIZE);// memset一般跟着kalloc，将kalloc分配的的物理地址统一赋值
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
@@ -275,6 +275,25 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+  }
+
+  return newsz;
+}
+
+
+// Deallocate user pages to bring the process size from oldsz to
+// newsz.  oldsz and newsz need not be page-aligned, nor does newsz
+// need to be less than oldsz.  oldsz can be larger than the actual
+// process size.  Returns the new process size.
+uint64
+kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
   }
 
   return newsz;
@@ -393,23 +412,25 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  // kernel空间没有user页表，导致user的虚拟地址无法直接使用，而是要换成物理地址才能使用，换成物理地址的方式也是通过软件查表转换
+  // srcva是用户虚拟地址，dst是内核地址
+  // uint64 n, va0, pa0;
+  // while(len > 0){
+  //   va0 = PGROUNDDOWN(srcva);
+  //   pa0 = walkaddr(pagetable, va0);
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > len)
+  //     n = len;
+  //   memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
-
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  //   len -= n;
+  //   dst += n;
+  //   srcva = va0 + PGSIZE;
+  // }
+  // return 0;
+  return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -419,44 +440,46 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
+  // uint64 n, va0, pa0;
+  // int got_null = 0;
 
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
+  // while(got_null == 0 && max > 0){
+  //   va0 = PGROUNDDOWN(srcva);
+  //   pa0 = walkaddr(pagetable, va0);
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > max)
+  //     n = max;
 
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
-    }
+  //   char *p = (char *) (pa0 + (srcva - va0));
+  //   while(n > 0){
+  //     if(*p == '\0'){
+  //       *dst = '\0';
+  //       got_null = 1;
+  //       break;
+  //     } else {
+  //       *dst = *p;
+  //     }
+  //     --n;
+  //     --max;
+  //     p++;
+  //     dst++;
+  //   }
 
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
-    return -1;
-  }
+  //   srcva = va0 + PGSIZE;
+  // }
+  // if(got_null){
+  //   return 0;
+  // } else {
+  //   return -1;
+  // }
+  return copyinstr_new(pagetable, dst, srcva, max);
 }
 
+
 void
-vmprint(pagetable_t pagetable,int depth)
+vmprint_helper(pagetable_t pagetable,int depth)
 {
   if (depth > 2) return;
   if (depth ==0){
@@ -483,8 +506,49 @@ vmprint(pagetable_t pagetable,int depth)
       default:
         break;
       }
-      vmprint((pagetable_t)child,depth+1);
+      vmprint_helper((pagetable_t)child,depth+1);
     }
   }
   return;
+}
+
+void
+vmprint(pagetable_t pagetable){
+  vmprint_helper(pagetable,0);
+}
+
+// 一个将user pagetable 拷贝到 kernel pagetable的程序
+// 只创建相应的pte条目即可，不新建新的物理内存
+// 有时user空间会动态分配内存，这就需要我们不止从虚拟地址0开始拷贝，参数添加一个start，表示从start开始拷贝
+int
+copyu2k(pagetable_t user_pgtable, pagetable_t kernel_pagetable,uint64 start, uint64 sz)
+{
+  pte_t *pte,*kpte;
+  uint64 pa, i;
+  uint flags;
+  uint64 end=sz+start;
+  if(end > PLIC) end = PLIC;
+  for(i = PGROUNDUP(start); i < PGROUNDUP(end); i += PGSIZE){
+    if((pte = walk(user_pgtable, i, 0)) == 0)
+      panic("copyu2k: pte should exist");
+    if((*pte & PTE_V) == 0){
+      panic("copyu2k: page not present");
+    }
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    flags = flags &(~ PTE_U);// kernel空间不能访问user空间
+    if(mappages(kernel_pagetable, i, PGSIZE, (uint64)pa, flags) != 0){
+      goto err;
+    }
+  }
+  //end < start 这种情况对应于减少
+  for(i=PGROUNDUP(end);i<PGROUNDUP(start);i++){
+    kpte = walk(kernel_pagetable, i, 0);
+    (*kpte) &= (~ PTE_V);
+  }
+  return 0;
+
+ err:
+  uvmunmap(kernel_pagetable, 0, i / PGSIZE, 0);// 最后一个参数为0，代表不释放物理内存！
+  return -1;
 }

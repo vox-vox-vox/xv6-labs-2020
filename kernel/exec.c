@@ -107,7 +107,11 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-    
+  uvmunmap(p->kpagetable, 0, PGROUNDUP(oldsz)/PGSIZE, 0);
+  if(copyu2k(pagetable,p->kpagetable,0,sz)<0){// add user pagetable to kernel pagetable
+  // 注意这里要把新的pagetable（pagetable），而不是旧的（p->pagetable）复制到kpagetable中，否则会出现sz太小的情况，从而出现unmap
+    goto bad;
+  }
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
@@ -117,7 +121,7 @@ exec(char *path, char **argv)
   proc_freepagetable(oldpagetable, oldsz);
 
   if(p->pid==1) 
-    vmprint(p->pagetable,0);
+    vmprint(p->pagetable);
 
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)

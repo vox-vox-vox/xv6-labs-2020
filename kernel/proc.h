@@ -96,7 +96,7 @@ struct proc {
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
-  uint64 sz;                   // Size of process memory (bytes)
+  uint64 sz;                   // Size of process memory (bytes) 进程用户空间内存大小，也可以理解成alloc分配的user space的长度
   pagetable_t pagetable;       // User page table
   pagetable_t kpagetable;      // Kernel page table
   struct trapframe *trapframe; // data page for trampoline.S

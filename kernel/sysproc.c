@@ -46,8 +46,8 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
+  addr = myproc()->sz;// process 的大小
+  if(growproc(n) < 0)// n bytes
     return -1;
   return addr;
 }

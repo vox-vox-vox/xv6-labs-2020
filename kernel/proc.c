@@ -276,6 +276,8 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  copyu2k(p->pagetable, p->kpagetable, 0, p->sz);
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -290,21 +292,32 @@ userinit(void)
 
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
+// 增长时的逻辑和减小时的逻辑不一样
 int
 growproc(int n)
 {
   uint sz;
+  uint newsz=0;
   struct proc *p = myproc();
 
   sz = p->sz;
-  if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+  if(n > 0){// 如果n大于0，说明是user space增长
+    if((newsz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
-  } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    // if((sz = uvmalloc(p->kpagetable, sz, sz + n)) == 0) {
+    //   return -1;
+    // } 这么写是不对的，uvmalloc分配了pte和对应的物理空间，实际上kernel pagetable只需要pte，不需要物理空间，所以不能直接这样分配
+  } else if(n < 0){// 如果n小于0，说明是user space减少
+    if((newsz = uvmdealloc(p->pagetable, sz, sz + n)) == 0) {
+      return -1;
+    }
   }
-  p->sz = sz;
+  p->sz = newsz;
+  if(copyu2k(p->pagetable,p->kpagetable,sz,n)!=0){
+    uvmdealloc(p->pagetable, newsz, sz);// 如果没分配成功，就释放已经分配的
+    return -1;
+  }
   return 0;
 }
 
@@ -323,7 +336,10 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0
+  ||copyu2k(np->pagetable, np->kpagetable,0,p->sz)<0)// 如果是copyu2k(p->pagetable, np->kpagetable,0,p->sz)，则其本质上建立了一个从新的子进程pte到父进程物理空间的映射，这样是不对的。
+  {
+
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -811,5 +827,8 @@ proc_kpagetable(struct proc *p)
   if(mappages(kernel_pagetable, va, PGSIZE, (uint64)pa, PTE_R | PTE_W) != 0)
     panic("stack");
   p->kstack = va;
+  
+  // copy user pagetable into kernel pagetable
+  copyu2k(p->pagetable,p->kpagetable,0,p->sz);
   return kernel_pagetable;
 }
