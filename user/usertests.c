@@ -2022,13 +2022,9 @@ sbrkmuch(char *s)
   enum { BIG=100*1024*1024 };
   char *c, *oldbrk, *a, *lastaddr, *p;
   uint64 amt;
-
   oldbrk = sbrk(0);
-  printf("\n");
-  printf("oldbrk ===============%p==============\n",oldbrk);
   // can one grow address space to something big?
   a = sbrk(0);
-  printf("a ===============%p==============\n",a);
   amt = BIG - (uint64)a;
   p = sbrk(amt);
   if (p != a) {
@@ -2036,11 +2032,8 @@ sbrkmuch(char *s)
     exit(1);
   }
 
-  printf("p ===============%p==============\n",p);
-
   // touch each page to make sure it exists.
   char *eee = sbrk(0);
-  printf("eee ===============%p==============\n",eee);
   for(char *pp = a; pp < eee; pp += 4096)
     *pp = 1;
 
@@ -2049,17 +2042,14 @@ sbrkmuch(char *s)
 
   // can one de-allocate?
   a = sbrk(0);
-  printf("a ===============%p==============\n",a);
 
   c = sbrk(-PGSIZE);
-  printf("c ===============%p==============\n",c);
 
   if(c == (char*)0xffffffffffffffffL){
     printf("%s: sbrk could not deallocate\n", s);
     exit(1);
   }
   c = sbrk(0);
-   printf("===============%p==============\n",c);
 
   if(c != a - PGSIZE){
     printf("%s: sbrk deallocation produced wrong address, a %x c %x\n", a, c);
@@ -2068,9 +2058,7 @@ sbrkmuch(char *s)
 
   // can one re-allocate that page?
   a = sbrk(0);
-  printf("===============%p==============\n",a);
   c = sbrk(PGSIZE);
-  printf("===============%p==============\n",c);
 
   if(c != a || sbrk(0) != a + PGSIZE){
     printf("%s: sbrk re-allocation failed, a %x c %x\n", a, c);
@@ -2083,10 +2071,8 @@ sbrkmuch(char *s)
   }
 
   a = sbrk(0);
-  printf("===============7==============\n");
 
   c = sbrk(-(sbrk(0) - oldbrk));
-  printf("===============8==============\n");
 
   if(c != a){
     printf("%s: sbrk downsize failed, a %x c %x\n", a, c);

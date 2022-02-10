@@ -299,7 +299,9 @@ growproc(int n)
   uint sz;
   uint newsz=0;
   struct proc *p = myproc();
-
+  if(n==0) {
+    return 0;
+  }
   sz = p->sz;
   if(n > 0){// 如果n大于0，说明是user space增长
     if((newsz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
@@ -307,11 +309,12 @@ growproc(int n)
     }
     // if((sz = uvmalloc(p->kpagetable, sz, sz + n)) == 0) {
     //   return -1;
-    // } 这么写是不对的，uvmalloc分配了pte和对应的物理空间，实际上kernel pagetable只需要pte，不需要物理空间，所以不能直接这样分配
+    // } BUG!!! 这么写是不对的，uvmalloc分配了pte和对应的物理空间，实际上kernel pagetable只需要pte，不需要物理空间，所以不能直接这样分配
   } else if(n < 0){// 如果n小于0，说明是user space减少
-    if((newsz = uvmdealloc(p->pagetable, sz, sz + n)) == 0) {
-      return -1;
-    }
+    // if((newsz = uvmdealloc(p->pagetable, sz, sz + n)) == 0) { 
+    //   return -1;
+    // }  BUG!!! 当清空数据时，返回确实有可能为0，所以原来人家这块才没用==0，你不要乱改
+    newsz = uvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = newsz;
   if(copyu2k(p->pagetable,p->kpagetable,sz,n)!=0){
