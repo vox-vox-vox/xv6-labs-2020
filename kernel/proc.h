@@ -32,12 +32,14 @@ extern struct cpu cpus[NCPU];
 // sits in a page by itself just under the trampoline page in the
 // user page table. not specially mapped in the kernel page table.
 // the sscratch register points here.
+// 每个进程为了trampolin.S都有一个trapframe，这个trapframe在user pagetable中，就在trampoline.S底下，sscratch指针指向这里
 // uservec in trampoline.S saves user registers in the trapframe,
 // then initializes registers from the trapframe's
 // kernel_sp, kernel_hartid, kernel_satp, and jumps to kernel_trap.
 // usertrapret() and userret in trampoline.S set up
 // the trapframe's kernel_*, restore user registers from the
 // trapframe, switch to the user page table, and enter user space.
+
 // the trapframe includes callee-saved user registers like s0-s11 because the
 // return-to-user path via usertrapret() doesn't return through
 // the entire kernel call stack.
