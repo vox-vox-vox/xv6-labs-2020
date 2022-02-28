@@ -105,4 +105,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // information for trap lab -alarm
+  int ticks_required;
+  uint64 handler_ptr;
+  int ticks_now;// 距离上一次调用handler结束，已经执行了多少个CPU时间片
+  struct trapframe trapframe_cp;// 一个trapframe的全量拷贝
+  int inhandler;
 };

@@ -77,8 +77,24 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2){
+    
+    if(p->inhandler!=1) {//如果当前用户态正处于handler()中，就不能再响应interrupt
+      if (p->ticks_required!=0) {//如果调用sigalarm(0,0)，则不响应timer_interrupt
+        if(p->ticks_now == p->ticks_required){
+          p->trapframe_cp=*(p->trapframe);// 保存返回地址or保存整个trapframe
+          p->trapframe->epc=p->handler_ptr;
+          p->inhandler=1;// 表示在handler中，不应再响应interrupt
+          p->ticks_now=0;
+        }
+        else{
+          p->ticks_now=p->ticks_now+1;
+        }
+      }
+    }
+    yield();// yield是干啥的？？
+  }
+
 
   usertrapret();
 }

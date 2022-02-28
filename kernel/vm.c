@@ -91,6 +91,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
 // Look up a virtual address, return the physical address,
 // or 0 if not mapped.
 // Can only be used to look up user pages.
+// walkaddr用于寻找用户空间虚拟地址对应的物理地址，如果这个虚拟地址是内核的，将不会返回其物理地址，这也被视为提供了一种kernel的隔离
 uint64
 walkaddr(pagetable_t pagetable, uint64 va)
 {
@@ -105,7 +106,7 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
   if((*pte & PTE_V) == 0)
     return 0;
-  if((*pte & PTE_U) == 0)
+  if((*pte & PTE_U) == 0)// 如果不是user的，就不能生效
     return 0;
   pa = PTE2PA(*pte);
   return pa;
