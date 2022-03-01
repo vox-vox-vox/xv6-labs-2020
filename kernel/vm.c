@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include"spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -57,8 +59,8 @@ kvminithart()
 }
 
 // Return the address of the PTE in page table pagetable
-// that corresponds to virtual address va.  If alloc!=0,
-// create any required page-table pages.
+  // that corresponds to virtual address va.  If alloc!=0,
+  // create any required page-table pages.
 //
 // The risc-v Sv39 scheme has three levels of page-table
 // pages. A page-table page contains 512 64-bit PTEs.
@@ -103,8 +105,13 @@ walkaddr(pagetable_t pagetable, uint64 va)
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     return 0;
-  if((*pte & PTE_V) == 0)
-    return 0;
+  if((*pte & PTE_V) == 0){// 说明此时发生了page_fault,也要进行lazy_alloc
+    if (lazy_alloc(va) == 0) {
+      pte = walk(pagetable, va, 0);
+    } else {
+      return 0;
+    }
+  }
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
@@ -180,10 +187,14 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+    if((pte = walk(pagetable, a, 0)) == 0){
+      //vmprint(pagetable);
+      continue;
+      //panic("uvmunmap: walk");
+    }
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      continue;
+      // panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -315,9 +326,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
+      //panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
+      // panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -439,4 +452,65 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void
+vmprint_helper(pagetable_t pagetable,int depth)
+{
+  if (depth > 2) return;
+  if (depth ==0){
+    printf("page table %p\n",pagetable);
+  }
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      switch (depth)
+      {
+      case 0:
+        /* code */
+        printf("..%d: pte %p pa %p\n",i,pte,child);
+        break;
+      case 1:
+        printf(".. ..%d: pte %p pa %p\n",i,pte,child);
+
+        break;
+      case 2:
+        printf(".. .. ..%d: pte %p pa %p\n",i,pte,child);
+        break;
+      default:
+        break;
+      }
+      vmprint_helper((pagetable_t)child,depth+1);
+    }
+  }
+  return;
+}
+
+void
+vmprint(pagetable_t pagetable){
+  vmprint_helper(pagetable,0);
+}
+
+int
+lazy_alloc(uint64 va){
+  struct proc *p = myproc();
+  if(va>p->sz||va<p->trapframe->sp){
+    printf("invalid address\n");
+    return -1;
+  }
+  va = PGROUNDDOWN(va);
+  char* mem=kalloc();//申请物理空间
+  if(mem==0){// 没有多余空间
+    printf(" no more RAM\n");
+    return -1;
+  }
+  memset(mem, 0, PGSIZE);//将物理空间全填充为0
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+    printf("alloc pte failed\n");
+    kfree(mem);
+    return -1;
+  }
+  return 0;
 }

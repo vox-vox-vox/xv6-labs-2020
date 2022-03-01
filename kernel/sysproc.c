@@ -46,9 +46,17 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  struct proc* p =myproc();  
+  addr = p->sz;
+  p->sz += n;
+  // 如果是减少堆内存，那确实应该确认把这部分全部清空，所以还是要调用真正的释放函数，因为这一部分要减少的堆内存中，
+  // 有可能有已经懒加载分配了的（这部分应该真的被释放），也有可能有画了饼但是还没有真的分配物理内存的（这部分没必要被释放）
+  if(n<0){
+    p->sz=uvmdealloc(p->pagetable, addr, addr + n);
+  }
+  // 取消对物理内存的真正分配
+  // if(growproc(n) < 0)
+  //   return -1;
   return addr;
 }
 

@@ -268,6 +268,7 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
+  // 原本是copy进程空间的所有部分（text，data，stack，heap），在lazy-alloc时只用copy到stack即可
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);

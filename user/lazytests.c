@@ -31,7 +31,6 @@ sparse_memory(char *s)
       exit(1);
     }
   }
-
   exit(0);
 }
 
