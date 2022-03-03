@@ -188,7 +188,6 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0){
-      //vmprint(pagetable);
       continue;
       //panic("uvmunmap: walk");
     }
@@ -496,6 +495,7 @@ vmprint(pagetable_t pagetable){
 int
 lazy_alloc(uint64 va){
   struct proc *p = myproc();
+  //判断地址是否合法
   if(va>p->sz||va<p->trapframe->sp){
     printf("invalid address\n");
     return -1;

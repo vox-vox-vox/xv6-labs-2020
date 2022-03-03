@@ -69,7 +69,7 @@ usertrap(void)
     // ok
   } else if(r_scause()==13||r_scause()==15){// 13 load pagefault; 15 store pagefault
       uint64 va=r_stval();
-      // 忘记判断地址是否合法
+
       if (lazy_alloc(va)<0){
         p->killed=1;
       }
