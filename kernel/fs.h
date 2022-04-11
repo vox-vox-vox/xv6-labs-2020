@@ -19,7 +19,7 @@ struct superblock {
   uint nlog;         // Number of log blocks
   uint logstart;     // Block number of first log block
   uint inodestart;   // Block number of first inode block
-  uint bmapstart;    // Block number of first free map block
+  uint bmapstart;    // Block number of first free map(bit map) block
 };
 
 #define FSMAGIC 0x10203040
@@ -41,20 +41,20 @@ struct dinode {
 // Inodes per block.
 #define IPB           (BSIZE / sizeof(struct dinode))
 
-// Block containing inode i
+// Block containing inode i ===> inode-number=i时所在的block的block-number
 #define IBLOCK(i, sb)     ((i) / IPB + sb.inodestart)
 
-// Bitmap bits per block
+// Bitmap bits per block ===> 一个block有多少bit，由于1byte=8bit，所以是BSIZE*8 = 1024*8
 #define BPB           (BSIZE*8)
 
-// Block of free map containing bit for block b
+// Block of free map(bit map) containing bit for block b ===> ***的block-number
 #define BBLOCK(b, sb) ((b)/BPB + sb.bmapstart)
 
 // Directory is a file containing a sequence of dirent structures.
 #define DIRSIZ 14
 
 struct dirent {
-  ushort inum;
-  char name[DIRSIZ];
+  ushort inum;// inode-number
+  char name[DIRSIZ];// 路径名
 };
 
