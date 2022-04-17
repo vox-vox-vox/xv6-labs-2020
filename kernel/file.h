@@ -27,7 +27,7 @@ struct inode {
   short minor;
   short nlink;
   uint size;          // inode对应的文件的大小
-  uint addrs[NDIRECT+1];
+  uint addrs[NDIRECT+2];
 };
 
 // map major device number to device functions.

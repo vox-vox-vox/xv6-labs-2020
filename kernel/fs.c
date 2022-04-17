@@ -385,28 +385,61 @@ bmap(struct inode *ip, uint bn)// 返回inode ip的第bn个block对应的block-n
 {
   uint addr, *a;
   struct buf *bp;
-  // 如果bn<12,直接返回inode中存储的block-number就行
+  // [0,10]
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
   bn -= NDIRECT;
-  // 如果bn>12,证明是间接块，要经过查找才能找到block-number
+  // [11,266]
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
+      // 如果间接块没有分配，就分配一个间接块
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
+    bp = bread(ip->dev, addr);// 读出间接块的buf
+    a = (uint*)bp->data;// 取出buf的data数据，这里面存放的全都是block-number
     if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
-      log_write(bp);
+      // 如果没有读出来block-number
+      a[bn] = addr = balloc(ip->dev);// 分配一个block，再填充block-number
+      log_write(bp);// 写间接块的buf到disk中
     }
-    brelse(bp);
+    brelse(bp);// 释放间接块buf
     return addr;
   }
-
+  // [267,...]
+  //                  ...
+  //                /-----double间接块--2
+  // double间接块--1 ------double间接块--2
+  //                \-----double间接块--2
+  //                  ...
+  //
+  bn -= NINDIRECT;
+  if(bn < DOUBLENINDIRECT){
+    int index = bn%NINDIRECT;
+    int offset = bn/NINDIRECT;
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      // 如果"double间接块--1"没有分配，就分配一个double间接块
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev); 
+    bp = bread(ip->dev, addr);// 读出"double间接块--1"的buf   
+    a = (uint*)bp->data;// 取出"double间接块--1"的data
+    if((addr = a[offset]) == 0){
+      // 如果没有读出来block-number
+      a[offset] = addr = balloc(ip->dev);// 分配一个block，再填充block-number
+      log_write(bp);// 写"double间接块--1"buf到disk中
+    }
+    brelse(bp);// 释放"double间接块--1"buf
+    bp = bread(ip->dev, addr);// 读出"double间接块--2"的buf   
+    a = (uint*)bp->data;// 取出"double间接块--2"的data
+    if((addr = a[index]) == 0){
+      // 如果没有读出来block-number
+      a[index] = addr = balloc(ip->dev);// 分配一个block，再填充block-number
+      log_write(bp);// 写"double间接块--2"buf到disk中
+    }
+    brelse(bp);// 释放"double间接块--2"buf
+    return addr;
+  }
   panic("bmap: out of range");
 }
 
@@ -415,9 +448,9 @@ bmap(struct inode *ip, uint bn)// 返回inode ip的第bn个block对应的block-n
 void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
+  int i, j, k;
+  struct buf *bp,*bp2;
+  uint *a,*a2;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -438,6 +471,25 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
 
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j]){// a[j]是block-num
+        bp2 = bread(ip->dev,a[j]);
+        a2 = (uint*)bp2->data;
+        for(k = 0; k < NINDIRECT; k++){
+          if(a2[k])
+            bfree(ip->dev, a2[k]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[j]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
+  }
   ip->size = 0;
   iupdate(ip);
 }
