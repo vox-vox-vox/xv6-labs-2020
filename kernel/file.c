@@ -44,6 +44,7 @@ filealloc(void)
 }
 
 // Increment ref count for file f.
+// dup一个file实质上就是增加它的ref引用
 struct file*
 filedup(struct file *f)
 {

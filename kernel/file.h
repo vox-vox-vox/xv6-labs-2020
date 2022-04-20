@@ -17,15 +17,15 @@ struct file {
 struct inode {
   uint dev;           // Device number
   uint inum;          // Inode number
-  int ref;            // Reference count ，可以理解成使用该inode的个数
+  int ref;            // Reference count 指向inode的指针个数
 
   struct sleeplock lock; // protects everything below here
   int valid;          // inode has been read from disk?
 
-  short type;         // copy of disk inode
+  short type;         // copy of disk inode，这个inode对应的文件的种类，包括directory，file等等
   short major;
   short minor;
-  short nlink;
+  short nlink;        // 链接数
   uint size;          // inode对应的文件的大小
   uint addrs[NDIRECT+2];
 };

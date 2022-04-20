@@ -177,7 +177,7 @@ bfree(int dev, uint b)
 struct {
   struct spinlock lock;
   struct inode inode[NINODE];
-} icache;
+} icache;// 保存了inode的缓存
 
 void
 iinit()
@@ -243,6 +243,7 @@ iupdate(struct inode *ip)
 // Find the inode with number inum on device dev
 // and return the in-memory copy. Does not lock
 // the inode and does not read it from disk.
+// 从inode-cache数组中找到一个能用的inode，先返回它，里面不放数据
 static struct inode*
 iget(uint dev, uint inum)
 {
@@ -334,6 +335,11 @@ iunlock(struct inode *ip)
 // to it, free the inode (and its content) on disk.
 // All calls to iput() must be inside a transaction in
 // case it has to free the inode.
+// 减少一个内存中的inode的reference引用
+// 如果这是最后一个reference，inode cache可以被循环利用，这个entry可以被其他inode-cache代替
+// 如果这是最后一个reference，而且inode没有link，可以释放disk上相应的dinode
+// 什么时候会出现存在link，但是不存在reference的情况？当操作系统当前并没有使用该inode时，他的nlink=1，但是reference=0
+// 可以将reference理解为内存引用
 void
 iput(struct inode *ip)
 {
@@ -596,6 +602,7 @@ namecmp(const char *s, const char *t)
 
 // Look for a directory entry in a directory.
 // If found, set *poff to byte offset of entry.
+// 在一个directory类型的文件中，寻找名字为name的entry
 struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
@@ -623,6 +630,7 @@ dirlookup(struct inode *dp, char *name, uint *poff)
 }
 
 // Write a new directory entry (name, inum) into the directory dp.
+// 将一个新的directory条目[name|inum] 写入dp inode中
 int
 dirlink(struct inode *dp, char *name, uint inum)
 {
@@ -666,6 +674,7 @@ dirlink(struct inode *dp, char *name, uint inum)
 //   skipelem("a", name) = "", setting name = "a"
 //   skipelem("", name) = skipelem("////", name) = 0
 //
+// 得到整个path左边第一个元素
 static char*
 skipelem(char *path, char *name)
 {
@@ -700,6 +709,11 @@ skipelem(char *path, char *name)
 static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
+  // 在inode "ip"下寻找"name"对应的inode，"name"是每个path的一部分单词
+  // 如path="/a/b/c"：
+  // 在根目录对应的inode下寻找"a"对应的inode，此时ip=root，name="a"，找到的inode再次记为ip
+  // 在ip下寻找"b"对应的inode，找到的inode再次记为ip
+  // 在ip下寻找"c"对应的inode，就是最后我们想找到的inode，此时这个inode不是directory，而是一个普通file
   struct inode *ip, *next;
 
   if(*path == '/')
@@ -732,6 +746,7 @@ namex(char *path, int nameiparent, char *name)
   return ip;
 }
 
+// 输入path，返回path代表的file对应的inode
 struct inode*
 namei(char *path)
 {
@@ -739,6 +754,9 @@ namei(char *path)
   return namex(path, 0, name);
 }
 
+// 输入path，返回最后一个file的parent对应的inode，这个inode一定是一个directory类型。name为最后一个元素的名字
+// 如 path="/a/b/c/d"，返回值为c对应的inode，name=d
+// 如果没有，就创建
 struct inode*
 nameiparent(char *path, char *name)
 {
